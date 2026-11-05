@@ -22,5 +22,11 @@
     "@types/node": "^22.19.19",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3"
+  },
+  "author": "wosledon",
+  "homepage": "https://github.com/wosledon/step-code-rally",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wosledon/step-code-rally.git"
   }
 }
