@@ -1,0 +1,26 @@
+{
+  "name": "step-code-rally",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pixel-art 2.5D racing game for StepCode - race while you write code.",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "tsx scripts/selftest.ts",
+    "frames": "tsx scripts/render-frames.ts",
+    "sim": "tsx scripts/debug-sim.ts",
+    "smoke": "step -e ./src/index.ts --mode rpc",
+    "sim:offroad": "tsx scripts/debug-offroad.ts",
+    "sim:curve": "tsx scripts/debug-curve.ts",
+    "sim:recover": "tsx scripts/debug-recover.ts",
+    "sim:manual": "tsx scripts/debug-manual.ts"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^1.5.0",
+    "@earendil-works/pi-tui": "^1.5.0",
+    "@types/node": "^22.19.19",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  }
+}
