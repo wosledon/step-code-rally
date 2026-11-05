@@ -10,7 +10,7 @@ import { Framebuffer } from "./fb.ts";
 import { buildThemeRuntime, THEMES, type Theme, type ThemeRuntime } from "./palette.ts";
 import { buildSpriteBank, type SpriteBank } from "./sprites.ts";
 import { buildTrack, type Track } from "./track.ts";
-import { RallyWorld, type SaveState } from "./game.ts";
+import { RallyWorld, TOKENS_AT_FULL_SPEED, type SaveState } from "./game.ts";
 import { renderScene } from "./scene.ts";
 import { framebufferToLines } from "./blit.ts";
 
@@ -70,6 +70,8 @@ export class RallyRuntime {
       const now = Date.now();
       const dt = Math.min(0.12, (now - this.lastTick) / 1000);
       this.lastTick = now;
+      this.updateTokenRate(now);
+      this.applyTokenDrive();
       if (!this.paused) this.world.update(dt);
       this.version++;
       for (const listener of this.listeners) listener(this);
@@ -144,6 +146,37 @@ export class RallyRuntime {
     this.world.shake = 1;
   }
 
+  /* ------------------------- token throughput ------------------------- */
+
+  /**
+   * Smoothed token rate in tokens/second, measured over a short sliding window
+   * so the car tracks the stream without jittering on every chunk.
+   */
+  tokenRate = 0;
+  private windowTokens = 0;
+  private windowStart = Date.now();
+
+  /** Report generated tokens (text, thinking and tool-call deltas). */
+  onTokens(count: number): void {
+    if (count <= 0) return;
+    this.windowTokens += count;
+  }
+
+  private updateTokenRate(now: number): void {
+    const elapsed = (now - this.windowStart) / 1000;
+    if (elapsed < 0.25) return;
+    const instant = this.windowTokens / elapsed;
+    // Half-and-half smoothing: responsive, but not a jitter per chunk.
+    this.tokenRate = this.tokenRate * 0.5 + instant * 0.5;
+    this.windowTokens = 0;
+    this.windowStart = now;
+  }
+
+  /** Map the measured token rate onto the car's allowed share of full speed. */
+  private applyTokenDrive(): void {
+    this.world.tokenDrive = Math.min(1, this.tokenRate / TOKENS_AT_FULL_SPEED);
+  }
+
   /* ---------------------------- rendering ---------------------------- */
 
   /** Render one frame into a framebuffer of the requested pixel size. */
@@ -177,6 +210,7 @@ export class RallyRuntime {
   statusLine(): string {
     const world = this.world;
     const lap = `${Math.min(world.lap, world.totalLaps)}/${world.totalLaps}`;
-    return `RALLY ${world.speedKmh}km/h · LAP ${lap} · SCORE ${Math.floor(world.stats.score)}`;
+    const tokens = `${Math.round(this.tokenRate)}tok/s`;
+    return `RALLY ${world.speedKmh}km/h · ${tokens} · LAP ${lap} · SCORE ${Math.floor(world.stats.score)}`;
   }
 }

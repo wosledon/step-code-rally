@@ -29,7 +29,6 @@ let rpcPanelOn = false;
 let rpcTickOff: (() => void) | null = null;
 let lastSave = 0;
 let statusThrottle = 0;
-let tokenCounter = 0;
 
 function isTui(ctx: ExtensionContext): boolean {
   return ctx.mode === "tui";
@@ -193,10 +192,18 @@ export default function (pi: ExtensionAPI) {
     else runtime.codeBoost(1);
   });
 
-  pi.on("message_update", () => {
+  pi.on("message_update", (event) => {
     if (!runtime) return;
-    // Throttle token-level updates into small nitro drips.
-    if (++tokenCounter % 24 === 0) runtime.addNitro(0.006);
+    // Token throughput drives the car's speed: one streamed chunk is roughly
+    // one token, so count the deltas (text, thinking and tool calls).
+    const stream = event.assistantMessageEvent;
+    if (
+      stream &&
+      (stream.type === "text_delta" || stream.type === "thinking_delta" || stream.type === "toolcall_delta") &&
+      typeof stream.delta === "string"
+    ) {
+      runtime.onTokens(Math.max(1, Math.round(stream.delta.length / 3)));
+    }
   });
 
   pi.on("input", (event) => {

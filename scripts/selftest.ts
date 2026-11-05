@@ -12,7 +12,7 @@ import { RallyRuntime } from "../src/runtime.ts";
 import { RallyPanel } from "../src/panel.ts";
 import { RallyGame } from "../src/play.ts";
 import { visibleWidthOf } from "../src/blit.ts";
-import { RallyWorld } from "../src/game.ts";
+import { MAX_SPEED, RallyWorld } from "../src/game.ts";
 import { buildThemeRuntime, THEMES } from "../src/palette.ts";
 import { buildSpriteBank } from "../src/sprites.ts";
 import { buildTrack } from "../src/track.ts";
@@ -32,12 +32,26 @@ function check(name: string, fn: () => void): void {
   }
 }
 
+async function checkAsync(name: string, fn: () => Promise<void>): Promise<void> {
+  try {
+    await fn();
+    passed++;
+    console.log(`  ok  ${name}`);
+  } catch (error) {
+    console.error(`FAIL  ${name}`);
+    console.error(error);
+    process.exitCode = 1;
+  }
+}
+
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 async function main(): Promise<void> {
   console.log("rally selftest\n");
 
   const runtime = new RallyRuntime({ theme: "day", totalLaps: 3 });
+  // Stand in for a live token stream (see the token-drive checks below).
+  runtime.world.tokenDrive = 0.9;
 
   check("world starts on lap 1 with a full tank", () => {
     assert.equal(runtime.world.lap, 1);
@@ -219,7 +233,7 @@ async function main(): Promise<void> {
 
   check("status line reports the race", () => {
     const status = runtime.statusLine();
-    assert.match(status, /RALLY \d+km\/h · LAP \d+\/\d+ · SCORE \d+/);
+    assert.match(status, /RALLY \d+km\/h · \d+tok\/s · LAP \d+\/\d+ · SCORE \d+/);
   });
 
   /* ---------------------------- fullscreen ---------------------------- */
@@ -355,6 +369,7 @@ async function main(): Promise<void> {
       billboards: sprites.billboards,
     });
     const world = new RallyWorld(track, sprites, { auto: false, trafficCount: 0 });
+    world.tokenDrive = 0.9;
     world.input.throttle = 1;
     for (let i = 0; i < 180; i++) world.update(1 / 60);
     const onRoad = world.speed;
@@ -366,6 +381,41 @@ async function main(): Promise<void> {
     // ...and the traction assist brings it back on its own.
     for (let i = 0; i < 180; i++) world.update(1 / 60);
     assert.equal(world.offRoad, false, "traction assist did not recover");
+  });
+
+  check("token throughput maps onto the speed ceiling", () => {
+    const world = runtime.world;
+    world.nitroTimer = 0;
+    world.offRoad = false;
+    world.tokenDrive = 0;
+    assert.ok(world.speedLimit() <= MAX_SPEED * 0.1001, `idle ceiling: ${world.speedLimit()}`);
+    world.tokenDrive = 0.5;
+    assert.ok(Math.abs(world.speedLimit() - MAX_SPEED * 0.5) < 1, `half: ${world.speedLimit()}`);
+    world.tokenDrive = 1;
+    assert.ok(Math.abs(world.speedLimit() - MAX_SPEED) < 1, `full: ${world.speedLimit()}`);
+    world.tokenDrive = 0.9;
+  });
+
+  check("manual driving keeps the full arcade speed range", () => {
+    const world = runtime.world;
+    world.auto = false;
+    world.tokenDrive = 0;
+    world.nitroTimer = 0;
+    world.offRoad = false;
+    assert.ok(world.speedLimit() >= MAX_SPEED, "manual ceiling is full speed");
+    world.auto = true;
+    world.tokenDrive = 0.9;
+  });
+
+  check("a stalled stream slows the car down", () => {
+    const world = runtime.world;
+    world.tokenDrive = 1;
+    world.nitroTimer = 0;
+    world.speed = MAX_SPEED;
+    world.tokenDrive = 0;
+    for (let i = 0; i < 90; i++) world.update(1 / 60);
+    assert.ok(world.speedKmh < 60, `car still fast: ${world.speedKmh} km/h`);
+    assert.ok(world.speed > 0, "car keeps creeping instead of stopping dead");
   });
 
   check("lane markings run the whole length of the road", () => {
@@ -418,6 +468,27 @@ async function main(): Promise<void> {
       assert.ok(counts[band]! > 0, `no lane markings in band ${band} (near->far): ${counts.join(",")}`);
     }
   });
+  await checkAsync("streaming tokens raise the measured rate and the car's ceiling", async () => {
+    const live = new RallyRuntime({ theme: "day" });
+    live.start();
+    try {
+      // ~120 tokens/sec for a second.
+      for (let i = 0; i < 10; i++) {
+        live.onTokens(12);
+        await delay(100);
+      }
+      assert.ok(live.tokenRate > 40, `measured rate: ${live.tokenRate.toFixed(1)} tok/s`);
+      assert.ok(live.world.tokenDrive > 0.6, `drive: ${live.world.tokenDrive.toFixed(2)}`);
+
+      // Stop streaming: the rate decays and the car is allowed to slow down.
+      await delay(1300);
+      assert.ok(live.tokenRate < 10, `rate after the stream stopped: ${live.tokenRate.toFixed(1)}`);
+      assert.ok(live.world.tokenDrive < 0.2, `drive after the stream stopped: ${live.world.tokenDrive.toFixed(2)}`);
+    } finally {
+      live.stop();
+    }
+  });
+
   console.log(`\n${passed} checks passed${process.exitCode ? " (with failures)" : ""}`);
 }
 void main();

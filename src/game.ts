@@ -14,6 +14,10 @@ const BRAKING = -MAX_SPEED;
 const COAST_DECEL = -MAX_SPEED / 7;
 const OFF_ROAD_DECEL = -MAX_SPEED / 1.4;
 const OFF_ROAD_LIMIT = MAX_SPEED / 3.4;
+/** Token throughput (tokens/sec) that maps to full speed. */
+export const TOKENS_AT_FULL_SPEED = 60;
+/** Creep speed while nothing is being generated, so the car never looks dead. */
+export const IDLE_DRIVE = 0.1;
 const CENTRIFUGAL = 0.22;
 const NITRO_MULTIPLIER = 1.34;
 const NITRO_DRAIN = 0.25; // bar per second
@@ -107,6 +111,11 @@ export class RallyWorld {
   offRoad = false;
   skyOffset = 0;
   clock = 0;
+  /**
+   * 0..1 share of full speed the current token throughput allows. This is what
+   * makes the panel a live throughput meter: fast streaming = fast car.
+   */
+  tokenDrive = 0;
   auto: boolean;
   finished = false;
   stats: RallyStats = emptyStats();
@@ -204,15 +213,24 @@ export class RallyWorld {
     this.stats.codeBoosts += amount;
     this.stats.score += 25 * amount;
     this.addNitro(0.05 * amount);
-    this.speed = Math.min(this.maxSpeed(), this.speed + MAX_SPEED * 0.05 * amount);
+    this.speed = Math.min(this.speedLimit(), this.speed + MAX_SPEED * 0.05 * amount);
     if (this.nitro > 0.3 && this.crashTimer <= 0) this.nitroTimer = Math.max(this.nitroTimer, 0.55);
   }
 
-  maxSpeed(): number {
-    let max = MAX_SPEED;
-    if (this.nitroTimer > 0) max *= NITRO_MULTIPLIER;
-    if (this.offRoad) max = Math.min(max, OFF_ROAD_LIMIT * (this.nitroTimer > 0 ? 1.25 : 1));
-    return max;
+  /**
+   * Speed ceiling for this frame. In autopilot (the spectator panel) it is the
+   * token throughput times the nitro bonus, capped off-road — that is what
+   * makes the panel a live throughput meter. A human driver gets the full
+   * arcade range instead, so the game stays playable while the agent is idle.
+   * Either way the car engine-brakes down to the ceiling rather than being
+   * clamped, so a slowing stream slows the car smoothly.
+   */
+  speedLimit(): number {
+    const drive = this.auto ? Math.max(IDLE_DRIVE, Math.min(1, this.tokenDrive)) : 1;
+    let limit = MAX_SPEED * drive;
+    if (this.nitroTimer > 0) limit *= NITRO_MULTIPLIER;
+    if (this.offRoad) limit = Math.min(limit, OFF_ROAD_LIMIT * (this.nitroTimer > 0 ? 1.25 : 1));
+    return limit;
   }
 
   get speedKmh(): number {
@@ -271,7 +289,11 @@ export class RallyWorld {
     } else {
       this.shake = Math.max(0, this.shake - dt * 3);
     }
-    this.speed = Math.min(this.speed, this.maxSpeed());
+    // Token-speed limiter: ease down to the ceiling rather than snapping to it.
+    const limit = this.speedLimit();
+    if (this.speed > limit) {
+      this.speed = Math.max(limit, this.speed - MAX_SPEED * 1.1 * dt);
+    }
 
     // Nitro.
     if (this.nitroTimer > 0) {

@@ -138,6 +138,8 @@ function makeRig(themeName: keyof typeof THEMES, width: number, height: number, 
     billboards: sprites.billboards,
   });
   const world = new RallyWorld(track, sprites, { auto: true, totalLaps: 3 });
+  // Stand in for a live token stream so the frames show a moving car.
+  world.tokenDrive = 0.92;
   const config: SceneConfig = { width, height, hud, runtime, sprites, track };
   return { runtime, config, world };
 }

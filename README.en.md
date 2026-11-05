@@ -22,7 +22,7 @@ It is **off by default**. Run `/rally on` and a racing panel appears on the righ
 
 - **Opt-in floating panel.** `/rally on` drops a racing panel on the right edge of the terminal. It does not steal keyboard focus, so the editor stays yours — the race just runs beside your code. `/rally off` closes it.
 - **45° top-down pixel art.** The camera looks down at the track at 45°, so the whole frame is road and scenery — the RC Pro-Am / Micro Machines angle. Curves, crests and dips come from a real segment projection, rasterised into a palette framebuffer and drawn with Unicode half-blocks so every pixel stays square.
-- **Code is fuel.** Tool calls, streamed tokens and your prompts add nitro and score while the panel is open — it doubles as a "how much work is happening" meter.
+- **Code speed is car speed.** In the panel the car's speed *is* the model's token generation rate: 60 tok/s is full speed, a fast stream makes a fast car, and a stalled stream eases it down to an idle creep — so it doubles as a live throughput meter. Tool calls and your prompts add nitro and score on top.
 - **Driver assist.** A traction correction blends a corrective steer in past the shoulder margin — it never fights your steering, but it will not let the car stay out on the grass, whether you are driving or the autopilot is. There is also an adaptive cruise that matches the speed of the car in front instead of rear-ending it, and crashes can no longer kick the car off the road.
 - **One race, two views.** `/rally` takes the wheel fullscreen (the panel hides itself and comes back after); leaving hands the car back to the autopilot.
 - **Session persistence.** Lap times, best lap, score, distance and position are saved into the session (like the built-in Snake example), so `/new` or `/resume` picks the race back up.
@@ -106,17 +106,28 @@ widget lines instead — handy for IDE clients that embed the agent.
 | Tool call starts | +nitro |
 | Tool result (success) | +score, +nitro, speed kick |
 | Tool result (error) | nitro burn cancelled, car shaken |
-| Streamed tokens (throttled) | small nitro drips |
+| Streamed tokens (text/thinking/tool-call deltas) | **sets the car's speed** (60 tok/s = full speed) |
 | You send a prompt | bigger boost |
 
-Overtaking traffic, clean laps and drifting through curves refill the bar too — errors cost you the burn.
+Mapping: `tokenRate / 60` clamped to 0..1 is the share of full speed allowed, with a 10% idle floor (~32 km/h) so the car creeps rather than stopping when nothing is being generated. The rate is measured over a 250ms sliding window with half-life smoothing, so it does not jitter per chunk. Nitro multiplies 1.34x on top of the token ceiling.
+
+Manual fullscreen driving is not limited by the token rate (otherwise the game would barely move while the agent is idle) — it keeps the full arcade speed range.
+
+Measured curve from one real agent turn (the model thinks first, then streams; `step --mode rpc`):
+
+| t | speed | state |
+|---|---|---|
+| 5s | 32 km/h | thinking, no tokens — idle creep |
+| 15s | 156 km/h | stream ramps up, smooth acceleration |
+| 25s | 301 km/h | full stream rate |
+| 30s | 274 km/h | stream finished, easing down |
 
 ## Development
 
 ```bash
 npm install
 npm run typecheck   # tsc --noEmit
-npm test            # 34 checks: physics, laps, persistence, panel/game rendering, assists, lane markings
+npm test            # 38 checks: physics, laps, persistence, panel/game rendering, assists, lane markings, token speed
 npm run frames      # render QA frames to frames/*.png
 npm run sim         # second-by-second simulation trace (tuning)
 npm run sim:offroad # off-road share + crash count over several random tracks
